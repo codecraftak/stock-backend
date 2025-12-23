@@ -14,11 +14,6 @@ yfinance==0.2.32
 # Environment Variables
 python-dotenv==1.0.0
 
-# OpenAI (GPT-4)
-openai==1.3.0
-
-# Anthropic (Claude)
-anthropic==0.7.0
 
 # Data Processing
 pandas==2.1.3
@@ -36,3 +31,5 @@ slowapi==0.1.9
 
 # Logging
 python-json-logger==2.0.7
+
+aiofiles
