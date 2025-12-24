@@ -207,15 +207,8 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data from Yahoo Finance"""
     print(f"📊 Fetching from Yahoo Finance for: {symbol}")
 
-    # ADD THESE LINES HERE:
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    })
-    
     # Get symbol variations
     if '.' in symbol or symbol.isupper():
-        # Already a proper symbol, use as is
         variations = [symbol]
     else:
         # Resolve the symbol
@@ -224,49 +217,84 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     for ticker_symbol in variations:
         try:
             print(f"   🔍 Trying: {ticker_symbol}")
-            stock = yf.Ticker(ticker_symbol, session=session)
-            info = stock.info
+
+            stock = yf.Ticker(ticker_symbol)
             
+            try:
+                info = stock.info
+            except:
+                try:
+                    info = stock.get_info()
+                except:
+                    print(f" ⚠️ Could not fetch info for {ticker_symbol}")
+                    continue
+            
+            #validate info
+            if not info or len(info)<3:
+                print(f"   ⚠️ invalid/empty info for {ticker_symbol}")
+                continue
+
+            #get current price            
             current_price = (
                 info.get('currentPrice') or 
                 info.get('regularMarketPrice') or
                 info.get('previousClose')
             )
             
-            if current_price and current_price > 0:
+            if not current_price and current_price <= 0:
+                print(f"   ⚠️ No valid price for {ticker_symbol}")
+                continue
+
+            #get history
+            try:
                 hist = stock.history(period="1y")
+            except:
+                try:
+                    hist=stock.history(period="1mo")
+                except:
+                    hist=None
                 
-                data = {
-                    'symbol': ticker_symbol,
-                    'name': info.get('longName', info.get('shortName', symbol)),
-                    'price': current_price,
-                    'currency': info.get('currency', 'USD'),
-                    'market_cap': info.get('marketCap'),
-                    'pe_ratio': info.get('trailingPE'),
-                    'forward_pe': info.get('forwardPE'),
-                    'peg_ratio': info.get('pegRatio'),
-                    'price_to_book': info.get('priceToBook'),
-                    'debt_to_equity': info.get('debtToEquity'),
-                    'roe': info.get('returnOnEquity'),
-                    'eps': info.get('trailingEps'),
-                    'dividend_yield': info.get('dividendYield'),
-                    'beta': info.get('beta'),
-                    'day_high': info.get('dayHigh'),
-                    'day_low': info.get('dayLow'),
-                    'week_52_high': info.get('fiftyTwoWeekHigh'),
-                    'week_52_low': info.get('fiftyTwoWeekLow'),
-                    'volume': info.get('volume'),
-                    'avg_volume': info.get('averageVolume'),
-                    'sector': info.get('sector'),
-                    'industry': info.get('industry'),
-                    'history': hist,
-                    'info': info,
-                    'institutional_holders': stock.institutional_holders,
-                    'news': stock.news[:10] if stock.news else []
-                }
+            data = {
+                'symbol': ticker_symbol,
+                'name': info.get('longName', info.get('shortName', symbol)),
+                'price': current_price,
+                'currency': info.get('currency', 'USD'),
+                'market_cap': info.get('marketCap'),
+                'pe_ratio': info.get('trailingPE'),
+                'forward_pe': info.get('forwardPE'),
+                'peg_ratio': info.get('pegRatio'),
+                'price_to_book': info.get('priceToBook'),
+                'debt_to_equity': info.get('debtToEquity'),
+                'roe': info.get('returnOnEquity'),
+                'eps': info.get('trailingEps'),
+                'dividend_yield': info.get('dividendYield'),
+                'beta': info.get('beta'),
+                'day_high': info.get('dayHigh'),
+                'day_low': info.get('dayLow'),
+                'week_52_high': info.get('fiftyTwoWeekHigh'),
+                'week_52_low': info.get('fiftyTwoWeekLow'),
+                'volume': info.get('volume'),
+                'avg_volume': info.get('averageVolume'),
+                'sector': info.get('sector'),
+                'industry': info.get('industry'),
+                'history': hist,
+                'info': info,
+                'institutional_holders': stock.institutional_holders,
+                'news': stock.news[:10] if stock.news else []
+            }
+            # Try to get additional data
+            try:
+                data['institutional_holders'] = stock.institutional_holders
+            except:
+                pass
+            
+            try:
+                data['news'] = stock.news[:10] if stock.news else []
+            except:
+                pass
                 
-                print(f"   ✅ Yahoo Finance: {ticker_symbol} - {data['name']}")
-                return data
+            print(f"   ✅ Yahoo Finance: {ticker_symbol} - {data['name']}")
+            return data
                 
         except Exception as e:
             print(f"   ⚠️ {ticker_symbol}: {str(e)[:100]}")
@@ -901,6 +929,35 @@ async def check_rate_limit():
         "reset_time_ist": None,
         "message": "No rate limit active"
     }
+
+# ADD THIS NEW ENDPOINT HERE:
+@app.get("/test-stock/{stock_name}")
+async def test_stock(stock_name: str):
+    """Test endpoint - Check if yfinance can fetch stock data"""
+    try:
+        print(f"\n🧪 TEST: Fetching {stock_name}...")
+        yf_data = fetch_yfinance_data(stock_name)
+        
+        if yf_data:
+            return {
+                "success": True,
+                "symbol": yf_data['symbol'],
+                "name": yf_data['name'],
+                "price": yf_data['price'],
+                "currency": yf_data['currency'],
+                "message": "✅ Stock data fetched successfully!"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Stock not found. Try ticker symbols like AAPL, MSFT, TCS.NS"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 
 
 if __name__ == "__main__":
