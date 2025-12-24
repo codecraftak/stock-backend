@@ -253,10 +253,10 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             try:
                 current_price = float(current_price)
                 if current_price <= 0:
-                    logger.warning(f"No valid price for {ticker_symbol}")
+                    print(f"No valid price for {ticker_symbol}")
                     continue
             except (TypeError, ValueError):
-                logger.warning(f"Invalid price format for {ticker_symbol}")
+                print(f"Invalid price format for {ticker_symbol}")
                 continue
 
             #get history
