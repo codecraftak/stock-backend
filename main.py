@@ -19,11 +19,16 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(
-    servers=[
-        {"url": "/", "description": "Current server"}
-    ]
-)
+# Add environment-based server config
+import os
+if os.getenv("RENDER"):  # Render sets this automatically
+    app = FastAPI(
+        servers=[
+            {"url": "https://stock-backend-l55g.onrender.com"}
+        ]
+    )
+else:
+    app = FastAPI()
 
 import requests
 requests.packages.urllib3.disable_warnings()
