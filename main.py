@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 import yfinance as yf
 yf.set_tz_cache_location("/tmp/yfinance_cache")
 from bs4 import BeautifulSoup
@@ -204,6 +206,12 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
 def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data from Yahoo Finance"""
     print(f"📊 Fetching from Yahoo Finance for: {symbol}")
+
+    # ADD THESE LINES HERE:
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
     
     # Get symbol variations
     if '.' in symbol or symbol.isupper():
@@ -216,15 +224,8 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     for ticker_symbol in variations:
         try:
             print(f"   🔍 Trying: {ticker_symbol}")
-            stock = yf.Ticker(ticker_symbol)
-            stock.session.timeout = 30
-            try:
-                info = stock.info
-                if not info or len(info) < 5:  # Check if info is valid
-                    raise ValueError("Invalid stock data")
-            except Exception as e:
-                print(f"   ⚠️ Info fetch failed: {e}")
-                continue
+            stock = yf.Ticker(ticker_symbol, session=session)
+            info = stock.info
             
             current_price = (
                 info.get('currentPrice') or 
@@ -233,7 +234,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             )
             
             if current_price and current_price > 0:
-                hist = stock.history(period="1y", timeout=30)
+                hist = stock.history(period="1y")
                 
                 data = {
                     'symbol': ticker_symbol,
