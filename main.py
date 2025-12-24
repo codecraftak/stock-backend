@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(
-    server=[
+    servers=[
         {"url": "/", "description": "Current server"}
     ]
 )
@@ -532,11 +532,11 @@ async def analyze_stock(request: StockRequest):
         print("="*80)
         
         # Step 1: Yahoo Finance
-        yf_data = fetch_yfinance_data(stock_name)
+        yf_data = fetch_yfinance_data(stock_name_final)
         if not yf_data:
             raise HTTPException(
                 status_code=404, 
-                detail=f"Stock '{stock_name}' not found. Try using the ticker symbol (e.g., AAPL, TCS.NS)"
+                detail=f"Stock '{stock_name_final}' not found. Try using the ticker symbol (e.g., AAPL, TCS.NS)"
             )
         
         data_sources.append("Yahoo Finance")
