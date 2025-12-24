@@ -185,14 +185,17 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
     """Convert user-friendly stock names to ticker symbols"""
     user_input_lower = user_input.strip().lower()
     
-    if user_input.isupper() and len(user_input) <= 5:
-        return [user_input, f"{user_input}.NS", f"{user_input}.BO"]
-    
+    # Check if it's in common stocks dictionary first
     if user_input_lower in COMMON_STOCKS:
         symbol = COMMON_STOCKS[user_input_lower]
         print(f"   🔍 Resolved '{user_input}' → '{symbol}'")
         return [symbol]
     
+    # If it looks like a ticker symbol already
+    if user_input.isupper() and len(user_input) <= 5:
+        return [user_input, f"{user_input}.NS", f"{user_input}.BO"]
+    
+    # Try variations of the input as ticker
     variations = [
         user_input.upper(),
         f"{user_input.upper()}.NS",
@@ -206,9 +209,15 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
 
 def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data from Yahoo Finance"""
-    print("📊 Fetching from Yahoo Finance...")
+    print(f"📊 Fetching from Yahoo Finance for: {symbol}")
     
-    variations = resolve_stock_symbol(symbol)
+    # Get symbol variations
+    if '.' in symbol or symbol.isupper():
+        # Already a proper symbol, use as is
+        variations = [symbol]
+    else:
+        # Resolve the symbol
+        variations = resolve_stock_symbol(symbol)
     
     for ticker_symbol in variations:
         try:
@@ -488,7 +497,7 @@ async def analyze_stock(request: StockRequest):
         if not yf_data:
             raise HTTPException(
                 status_code=404, 
-                detail=f"Stock '{stock_name}' not found. Try using the ticker symbol"
+                detail=f"Stock '{stock_name}' not found. Try using the ticker symbol (e.g., AAPL, TCS.NS)"
             )
         
         data_sources.append("Yahoo Finance")
@@ -540,7 +549,7 @@ async def analyze_stock(request: StockRequest):
         if not ai_tasks:
             raise HTTPException(
                 status_code=500,
-                detail="No AI API configured. Add GEMINI_API_KEY"
+                detail="No AI API configured. Add GEMINI_API_KEY to .env"
             )
         
         ai_results = await asyncio.gather(*ai_tasks)
@@ -778,7 +787,7 @@ async def analyze_stock(request: StockRequest):
         
         # Format currency
         currency = yf_data.get('currency', 'USD')
-        currency_symbol = '₹' if currency == 'INR' else '$'
+        currency_symbol = '₹' if currency == 'INR' else '
         current_price = f"{currency_symbol}{yf_data['price']:.2f}"
         
         # Prepare holders
@@ -865,7 +874,8 @@ async def root():
     return {
         "message": "🚀 Stock Analysis API",
         "version": "4.0",
-        "status": "running"
+        "status": "running",
+        "tip": "Use stock names like 'tcs', 'apple', or ticker symbols like 'AAPL', 'TCS.NS'"
     }
 
 
