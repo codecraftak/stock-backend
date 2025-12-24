@@ -19,7 +19,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(
+    server=[
+        {"url": "/", "description": "Current server"}
+    ]
+)
 
 import requests
 requests.packages.urllib3.disable_warnings()
