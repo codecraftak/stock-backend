@@ -787,7 +787,7 @@ async def analyze_stock(request: StockRequest):
         
         # Format currency
         currency = yf_data.get('currency', 'USD')
-        currency_symbol = '₹' if currency == 'INR' else '
+        currency_symbol = '₹' if currency == 'INR' else '$'
         current_price = f"{currency_symbol}{yf_data['price']:.2f}"
         
         # Prepare holders
