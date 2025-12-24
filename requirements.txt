@@ -19,8 +19,8 @@ python-dotenv==1.0.0
 pandas==2.1.3
 numpy==1.26.2
 
-# Async Support
-asyncio==3.4.3
+# # Async Support
+# asyncio==3.4.3
 
 # Caching (for performance)
 redis==5.0.1
