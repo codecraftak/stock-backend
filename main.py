@@ -230,7 +230,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                     continue
             
             #validate info
-            if not info or len(info)<3:
+            if not info or (isinstance(info, dict) and len(info) < 3):
                 print(f"   ⚠️ invalid/empty info for {ticker_symbol}")
                 continue
 
@@ -241,8 +241,13 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                 info.get('previousClose')
             )
             
-            if not current_price and current_price <= 0:
-                print(f"   ⚠️ No valid price for {ticker_symbol}")
+            try:
+                current_price = float(current_price)
+                if current_price <= 0:
+                    logger.warning(f"No valid price for {ticker_symbol}")
+                    continue
+            except (TypeError, ValueError):
+                logger.warning(f"Invalid price format for {ticker_symbol}")
                 continue
 
             #get history
