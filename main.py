@@ -528,7 +528,7 @@ async def analyze_stock(request: StockRequest):
     
     try:
         print("\n" + "="*80)
-        print(f"🔬 ENHANCED FREE ANALYSIS: {stock_name}")
+        print(f"🔬 ENHANCED FREE ANALYSIS: {stock_name_final}")
         print("="*80)
         
         # Step 1: Yahoo Finance
