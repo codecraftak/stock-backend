@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import requests
 import yfinance as yf
+yf.set_tz_cache_location("/tmp/yfinance_cache")
 from bs4 import BeautifulSoup
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,10 @@ load_dotenv()
 
 app = FastAPI()
 
+import requests
+requests.packages.urllib3.disable_warnings()
+
+# ===================== CORS CONFIGURATION =====================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://stock-prediction-analysis-report.netlify.app","*"],
@@ -29,16 +34,9 @@ app.add_middleware(
 # ===================== API CONFIGURATION =====================
 FREE_API_KEYS = {
     'gemini': os.getenv('GEMINI_API_KEY', ''),
-    'openai': os.getenv('OPENAI_API_KEY', ''),
-    'anthropic': os.getenv('ANTHROPIC_API_KEY', ''),
     'alpha_vantage': os.getenv('ALPHA_VANTAGE_KEY', ''),
     'finnhub': os.getenv('FINNHUB_KEY', ''),
-    'fmp': os.getenv('FMP_KEY', ''),
-    'marketstack': os.getenv('MARKETSTACK_KEY', ''),
-    'twelve': os.getenv('TWELVE_DATA_KEY', ''),
-    'eodhd': os.getenv('EODHD_KEY', ''),
     'news_api': os.getenv('NEWS_API_KEY', ''),
-    'gnews': os.getenv('GNEWS_KEY', ''),
 }
 
 # Common stock name to symbol mapping
@@ -107,8 +105,7 @@ print("\n" + "="*80)
 print("📊 FREE APIs STATUS")
 print("="*80)
 for api_name, key in FREE_API_KEYS.items():
-    status = "✅ Configured" if key else "❌ Not configured"
-    print(f"{api_name.upper():20s}: {status}")
+    print(f"{api_name}: {'✅' if key else '❌'}")
 print("="*80 + "\n")
 
 executor = ThreadPoolExecutor(max_workers=10)
@@ -123,15 +120,11 @@ class TechnicalIndicators(BaseModel):
     macd: Optional[str] = None
     sma_20: Optional[str] = None
     sma_50: Optional[str] = None
-    ema_12: Optional[str] = None
-    ema_26: Optional[str] = None
-    bollinger_bands: Optional[str] = None
 
 class NewsArticle(BaseModel):
     title: str
     source: str
     url: str
-    sentiment: Optional[str] = None
     published_at: Optional[str] = None
 
 class AIModelAnalysis(BaseModel):
@@ -177,6 +170,7 @@ class EnhancedStockAnalysis(BaseModel):
     actionable_insights: List[str]
     analysis_timestamp: str
     api_calls_used: int
+    debug_info: Optional[Dict] = None
 
 
 # ===================== SYMBOL RESOLVER =====================
@@ -223,7 +217,14 @@ def fetch_yfinance_data(symbol: str) -> Dict:
         try:
             print(f"   🔍 Trying: {ticker_symbol}")
             stock = yf.Ticker(ticker_symbol)
-            info = stock.info
+            stock.session.timeout = 30
+            try:
+                info = stock.info
+                if not info or len(info) < 5:  # Check if info is valid
+                    raise ValueError("Invalid stock data")
+            except Exception as e:
+                print(f"   ⚠️ Info fetch failed: {e}")
+                continue
             
             current_price = (
                 info.get('currentPrice') or 
@@ -232,7 +233,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             )
             
             if current_price and current_price > 0:
-                hist = stock.history(period="1y")
+                hist = stock.history(period="1y", timeout=30)
                 
                 data = {
                     'symbol': ticker_symbol,
