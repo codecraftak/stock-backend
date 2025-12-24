@@ -512,11 +512,16 @@ Return ONLY valid JSON, no markdown, no code blocks."""
 # ===================== MAIN ENDPOINT =====================
 
 @app.post("/analyze")
-async def analyze_stock(request: StockRequest):
+@app.get("/analyze/{stock_name}")
+async def analyze_stock(request: StockRequest = None, stock_name: str = None):
     """Complete FREE stock analysis using multiple APIs"""
     
-    stock_name = request.stock_name.strip()
-    if not stock_name:
+    # Handle both POST and GET requests
+    if stock_name:
+        request = StockRequest(stock_name=stock_name)
+    
+    stock_name_final = request.stock_name.strip()
+    if not stock_name_final:
         raise HTTPException(status_code=400, detail="Stock name required")
     
     api_calls = 0
