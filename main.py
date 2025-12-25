@@ -36,7 +36,10 @@ requests.packages.urllib3.disable_warnings()
 # ===================== CORS CONFIGURATION =====================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://stock-prediction-analysis-report.netlify.app",
+        "https://stock-backend-l55g.onrender.com"
+        ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
