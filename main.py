@@ -20,7 +20,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-app = FastAPI()
+app = FastAPI(
+    title="Stock Analysis API",
+    version="4.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
+)
 
 import requests
 requests.packages.urllib3.disable_warnings()
@@ -28,10 +34,7 @@ requests.packages.urllib3.disable_warnings()
 # ===================== CORS CONFIGURATION =====================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://stock-prediction-analysis-report.netlify.app",
-        "https://stock-backend-l55g.onrender.com"
-        ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -863,6 +866,7 @@ async def analyze_stock(request: StockRequest):
 
 
 @app.get("/")
+@app.head("/")
 async def root():
     return {
         "message": "🚀 Stock Analysis API",
