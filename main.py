@@ -343,12 +343,14 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             print(f"   ⚠️ {ticker_symbol}: {str(e)[:100]}")
             continue
     
-    return None
+    # All Yahoo attempts failed, try Alpha Vantage fallback
+    print("⚠️ Yahoo Finance blocked, trying Alpha Vantage...")
+    return fetch_alpha_vantage_quote(symbol)
 
 
 def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
     """Fetch technical indicators from Alpha Vantage"""
-    if not FREE_API_KEYS['alpha_vantage']:
+    if not FREE_API_KEYS['alpha_vantage keys not configured']:
         return {}
     
     print("📈 Fetching technical indicators from Alpha Vantage...")
@@ -379,6 +381,71 @@ def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
         print(f"   ⚠️ Alpha Vantage error: {e}")
     
     return indicators
+
+
+def fetch_alpha_vantage_quote(symbol: str) -> Dict:
+    """Fetch basic stock quote from Alpha Vantage (fallback for Yahoo)"""
+    if not FREE_API_KEYS['alpha_vantage']:
+        print("   ❌ Alpha Vantage key missing")
+        return None
+    
+    try:
+        base_symbol = symbol.split('.')[0]
+        
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'GLOBAL_QUOTE',
+            'symbol': base_symbol,
+            'apikey': FREE_API_KEYS['alpha_vantage']
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200:
+            return None
+            
+        data = response.json()
+        quote = data.get('Global Quote', {})
+        
+        if not quote:
+            print(f"   ❌ No Alpha Vantage data for {base_symbol}")
+            return None
+        
+        price = float(quote.get('05. price', 0))
+        if price <= 0:
+            return None
+        
+        print(f"   ✅ Alpha Vantage Quote: {base_symbol} = ${price:.2f}")
+        
+        return {
+            'symbol': base_symbol,
+            'name': base_symbol,
+            'price': price,
+            'currency': 'USD',
+            'day_high': float(quote.get('03. high', 0)),
+            'day_low': float(quote.get('04. low', 0)),
+            'volume': int(quote.get('06. volume', 0)),
+            'market_cap': None,
+            'pe_ratio': None,
+            'peg_ratio': None,
+            'price_to_book': None,
+            'debt_to_equity': None,
+            'roe': None,
+            'eps': None,
+            'dividend_yield': None,
+            'beta': None,
+            'week_52_high': None,
+            'week_52_low': None,
+            'sector': None,
+            'industry': None,
+            'history': None,
+            'info': {},
+            'institutional_holders': None,
+            'news': []
+        }
+        
+    except Exception as e:
+        print(f"   ❌ Alpha Vantage quote error: {e}")
+        return None
 
 
 def fetch_finnhub_news(symbol: str) -> List[Dict]:
