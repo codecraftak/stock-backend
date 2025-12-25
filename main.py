@@ -213,6 +213,14 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data from Yahoo Finance"""
     print(f"📊 Fetching from Yahoo Finance for: {symbol}")
 
+    # ADD THIS SESSION WITH RETRY
+    session = requests.Session()
+    session.headers.update({'User-Agent': 'Mozilla/5.0'})
+    retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
     # Get symbol variations
     if '.' in symbol or symbol.isupper():
         variations = [symbol]
@@ -224,12 +232,14 @@ def fetch_yfinance_data(symbol: str) -> Dict:
         try:
             print(f"   🔍 Trying: {ticker_symbol}")
 
-            stock = yf.Ticker(ticker_symbol)
+            stock = yf.Ticker(ticker_symbol, session=session)
             info=None
             try:
-                info = stock.info
-                if not info or len(info) < 5:
-                    info=stock.get_info()
+                import time
+                time.sleep(1)
+                info=stock.fast_info if hasattr(stock, 'fast_info') else stock.info
+                if not info or len(info) < 3:
+                    raise ValueError("Empty info")
             except Exception as e:
                 print(f"   ⚠️Info fetching error: {e}")
                 try:
@@ -505,6 +515,7 @@ async def analyze_stock(request: StockRequest):
         
         # Step 1: Yahoo Finance
         yf_data = fetch_yfinance_data(stock_name_final)
+        time.sleep(2)
         if not yf_data:
             raise HTTPException(
                 status_code=404, 
