@@ -225,14 +225,24 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             print(f"   🔍 Trying: {ticker_symbol}")
 
             stock = yf.Ticker(ticker_symbol)
-            
+            info=None
             try:
                 info = stock.info
-            except:
+                if not info or len(info) < 5:
+                    info=stock.get_info()
+            except Exception as e:
+                print(f"   ⚠️Info fetching error: {e}")
                 try:
-                    info = stock.get_info()
+                    hist=stock.history(period="5d")
+                    if not hist.empty:
+                        info={
+                            'currentPrice': hist['Close'].iloc[-1],
+                            'regularMarketPrice': hist['Close'].iloc[-1],
+                            'shortName': ticker_symbol,
+                            'longName': ticker_symbol
+                        }
                 except:
-                    print(f" ⚠️ Could not fetch info for {ticker_symbol}")
+                    print(f"   ⚠️Could not fetch info for {ticker_symbol}")
                     continue
             
             #validate info
