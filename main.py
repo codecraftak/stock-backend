@@ -345,22 +345,32 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     
     # All Yahoo attempts failed, try Alpha Vantage fallback
     print("⚠️ Yahoo Finance blocked, trying Alpha Vantage...")
-    return fetch_alpha_vantage_quote(symbol)
+    for ticker_symbol in variations:
+        print(f"   🔄 Trying Alpha Vantage: {ticker_symbol}")
+        av_data = fetch_alpha_vantage_quote(ticker_symbol)
+        if av_data:
+            return av_data
+    
+    return None
 
 
 def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
     """Fetch technical indicators from Alpha Vantage"""
-    if not FREE_API_KEYS['alpha_vantage keys not configured']:
-        return {}
+    if not FREE_API_KEYS['alpha_vantage']:
+        print("   ❌ Alpha Vantage key missing")    
+        return None
     
-    print("📈 Fetching technical indicators from Alpha Vantage...")
-    
-    base_symbol = symbol.split('.')[0]
-    
-    indicators = {}
-    base_url = "https://www.alphavantage.co/query"
+    print(f"   🔑 Using Alpha Vantage Key: {FREE_API_KEYS['alpha_vantage'][:10]}...")
+
     
     try:
+        base_symbol = symbol.split('.')[0]
+
+        indicators = {}
+        print(f"   📊 Fetching quote for: {base_symbol}")
+        
+        url = "https://www.alphavantage.co/query"
+
         params = {
             'function': 'RSI',
             'symbol': base_symbol,
@@ -369,13 +379,22 @@ def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
             'series_type': 'close',
             'apikey': FREE_API_KEYS['alpha_vantage']
         }
-        response = requests.get(base_url, params=params, timeout=10)
+
+        print(f"   📡 Request URL: {url}?symbol={base_symbol}&function=GLOBAL_QUOTE") 
+
+        response = requests.get(url, params=params, timeout=10)
+
+        print(f"   📊 Response Status: {response.status_code}")  # ADD THIS
+        print(f"   📄 Response Data: {response.text[:200]}")
+
         if response.status_code == 200:
             data = response.json()
             if 'Technical Analysis: RSI' in data:
                 latest = list(data['Technical Analysis: RSI'].values())[0]
                 indicators['rsi'] = f"{float(latest['RSI']):.2f}"
                 print(f"   ✅ RSI: {indicators['rsi']}")
+            else:
+                return None
         
     except Exception as e:
         print(f"   ⚠️ Alpha Vantage error: {e}")
