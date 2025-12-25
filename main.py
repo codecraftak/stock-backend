@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import json
+import time
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import requests
@@ -235,14 +236,21 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             stock = yf.Ticker(ticker_symbol, session=session)
             info=None
             try:
-                import time
                 time.sleep(1)
-                info=stock.fast_info if hasattr(stock, 'fast_info') else stock.info
-                if not info or len(info) < 3:
-                    raise ValueError("Empty info")
+
+                if hasattr(stock,'info'):
+                    info=stock.info
+                    if not info or (isinstance(info, dict) and len(info) < 3):
+                        print(f"   ⚠️ Empty info for {ticker_symbol}")
+                        raise ValueError("Empty info")
+                else:
+                    raise ValueError("No info attribute")
+
+
             except Exception as e:
                 print(f"   ⚠️Info fetching error: {e}")
                 try:
+                    time.sleep(1)
                     hist=stock.history(period="5d")
                     if not hist.empty:
                         info={
@@ -251,6 +259,10 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                             'shortName': ticker_symbol,
                             'longName': ticker_symbol
                         }
+                        print(f"   ✅ Fallback: got price from history: {info['currentPrice']}")
+                    else:
+                        print(f"   ⚠️ Empty history for {ticker_symbol}")
+                        continue 
                 except:
                     print(f"   ⚠️Could not fetch info for {ticker_symbol}")
                     continue
