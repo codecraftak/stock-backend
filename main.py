@@ -236,7 +236,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             stock = yf.Ticker(ticker_symbol, session=session)
             info=None
             try:
-                time.sleep(1)
+                time.sleep(3)
 
                 if hasattr(stock,'info'):
                     info=stock.info
@@ -250,7 +250,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
             except Exception as e:
                 print(f"   ⚠️Info fetching error: {e}")
                 try:
-                    time.sleep(1)
+                    time.sleep(3)
                     hist=stock.history(period="5d")
                     if not hist.empty:
                         info={
@@ -527,7 +527,7 @@ async def analyze_stock(request: StockRequest):
         
         # Step 1: Yahoo Finance
         yf_data = fetch_yfinance_data(stock_name_final)
-        time.sleep(2)
+        time.sleep(5)
         if not yf_data:
             raise HTTPException(
                 status_code=404, 
