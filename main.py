@@ -49,8 +49,7 @@ app.add_middleware(
 FREE_API_KEYS = {
     'gemini': os.getenv('GEMINI_API_KEY', ''),
     'alpha_vantage': os.getenv('ALPHA_VANTAGE_KEY', ''),
-    'finnhub': os.getenv('FINNHUB_KEY', ''),
-    'news_api': os.getenv('NEWS_API_KEY', ''),
+    'finnhub': os.getenv('FINNHUB_KEY', '')
 }
 
 # Common stock name to symbol mapping
@@ -398,47 +397,7 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
     
     return articles
 
-
-def fetch_news_api_articles(query: str) -> List[Dict]:
-    """Fetch news from NewsAPI"""
-    if not FREE_API_KEYS['news_api']:
-        return []
-    
-    print("📰 Fetching from NewsAPI...")
-    
-    articles = []
-    
-    try:
-        url = "https://newsapi.org/v2/everything"
-        params = {
-            'q': f"{query} stock",
-            'language': 'en',
-            'sortBy': 'publishedAt',
-            'pageSize': 10,
-            'apiKey': FREE_API_KEYS['news_api']
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            for article in data.get('articles', [])[:10]:
-                articles.append({
-                    'title': article.get('title', ''),
-                    'source': article.get('source', {}).get('name', ''),
-                    'url': article.get('url', ''),
-                    'published_at': article.get('publishedAt', '')
-                })
-            
-            print(f"   ✅ NewsAPI: {len(articles)} articles")
-    
-    except Exception as e:
-        print(f"   ⚠️ NewsAPI error: {e}")
-    
-    return articles
-
-
+   
 # ===================== AI ANALYSIS =====================
 
 async def analyze_with_gemini(prompt: str) -> Dict:
@@ -565,11 +524,6 @@ async def analyze_stock(request: StockRequest):
             data_sources.append("Finnhub")
             api_calls += 1
         
-        news_api_articles = fetch_news_api_articles(yf_data['name'])
-        if news_api_articles:
-            news_articles.extend(news_api_articles)
-            data_sources.append("NewsAPI")
-            api_calls += 1
         
         yf_news = [
             {
