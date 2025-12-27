@@ -10,7 +10,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import yfinance as yf
-yf.set_tz_cache_location("/tmp/yfinance_cache")
+# yf.set_tz_cache_location("/tmp/yfinance_cache") # Removed to use requests-cache instead
+import requests_cache
+
+# Configure generic cache
+requests_cache.install_cache('stock_api_cache', expire_after=3600, backend='sqlite')
+
 from bs4 import BeautifulSoup
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -214,10 +219,24 @@ def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data from Yahoo Finance"""
     print(f"📊 Fetching from Yahoo Finance for: {symbol}")
 
-    # ADD THIS SESSION WITH RETRY
-    session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0'})
-    retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    # CONFIGURING CACHED SESSION
+    session = requests_cache.CachedSession('yfinance_cache', expire_after=3600)
+    
+    # MIMIC REAL BROWSER HEADER
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    })
+    
+    retry = Retry(
+        total=3, 
+        backoff_factor=2, # Increased backoff
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)

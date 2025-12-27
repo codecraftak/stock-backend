@@ -9,7 +9,7 @@ beautifulsoup4==4.12.2
 aiohttp==3.9.1
 
 # Stock Market Data
-yfinance==0.2.32
+yfinance==0.2.33
 
 # Environment Variables
 python-dotenv==1.0.0
@@ -33,3 +33,6 @@ slowapi==0.1.9
 python-json-logger==2.0.7
 
 aiofiles
+
+# Caching
+requests-cache==1.1.1
