@@ -471,6 +471,53 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
     
     return []
 
+
+def fetch_yahoo_news_rss(symbol: str) -> List[Dict]:
+    """Fetch news from Yahoo RSS (Bypasses API blocks)"""
+    print(f"📰 Fetching Yahoo RSS news for {symbol}...")
+    articles = []
+    try:
+        # Clean symbol for Yahoo RSS (e.g. TCS.NS -> TCS.NS)
+        ticker = symbol.upper()
+        
+        url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
+        
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'xml')
+            items = soup.find_all('item')
+            
+            for item in items[:5]:
+                try:
+                    title = item.title.text
+                    link = item.link.text
+                    pub_date = item.pubDate.text
+                    
+                    # Convert pub_date to ISO if possible, else keep as is
+                    try:
+                        # Yahoo RSS format: "Fri, 27 Dec 2024 10:30:00 GMT"
+                        dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+                        iso_date = dt.isoformat()
+                    except:
+                        iso_date = str(datetime.now().isoformat())
+
+                    articles.append({
+                        'title': title,
+                        'source': 'Yahoo Finance',
+                        'url': link,
+                        'published_at': iso_date
+                    })
+                except:
+                    continue
+            
+            print(f"   ✅ Yahoo RSS: {len(articles)} articles")
+            
+    except Exception as e:
+        print(f"   ⚠️ Yahoo RSS error: {e}")
+
+    return articles
+
    
 # ===================== AI ANALYSIS =====================
 
@@ -598,25 +645,39 @@ async def analyze_stock(request: StockRequest):
         # Step 3: News from multiple sources
         news_articles = []
         
+        # 3a. Try Yahoo RSS (Best Quality, usually unblocked)
+        yahoo_rss_news = fetch_yahoo_news_rss(yf_data['symbol'])
+        if yahoo_rss_news:
+            news_articles.extend(yahoo_rss_news)
+            data_sources.append("Yahoo News (RSS)")
+            api_calls += 1
+        
+        # 3b. Try Finnhub News
         finnhub_news = fetch_finnhub_news(yf_data['symbol'])
         if finnhub_news:
             news_articles.extend(finnhub_news)
-            data_sources.append("Finnhub")
+            if "Finnhub" not in data_sources: 
+                data_sources.append("Finnhub")
             api_calls += 1
         
-        
-        yf_news = [
-            {
-                'title': article.get('title', ''),
-                'source': article.get('publisher', 'Yahoo Finance'),
-                'url': article.get('link', ''),
-                'published_at': datetime.fromtimestamp(
-                    article.get('providerPublishTime', 0)
-                ).isoformat()
-            }
-            for article in yf_data.get('news', [])[:5]
-        ]
-        news_articles.extend(yf_news)
+        # 3c. Try Yahoo API News (if available/mapped from yfinance result)
+        if yf_data.get('news'):
+             yf_api_news = [
+                {
+                    'title': article.get('title', ''),
+                    'source': article.get('publisher', 'Yahoo Finance'),
+                    'url': article.get('link', ''),
+                    'published_at': datetime.fromtimestamp(
+                        article.get('providerPublishTime', 0)
+                    ).isoformat()
+                }
+                for article in yf_data.get('news', [])[:5]
+            ]
+             # Avoid duplicates based on title
+             existing_titles = {n['title'] for n in news_articles}
+             for item in yf_api_news:
+                 if item['title'] not in existing_titles:
+                     news_articles.append(item)
         
         # Step 4: Multi-AI Analysis
         print("\n🤖 Running Multi-AI Analysis...")
