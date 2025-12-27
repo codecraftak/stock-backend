@@ -229,40 +229,60 @@ def fetch_yfinance_data(symbol: str) -> Dict:
         try:
             print(f"   🔍 Trying Yahoo Finance: {ticker_symbol}")
             
-            # Simple ticker creation - let yfinance handle session/headers naturally
-            # to avoid 'cookie & crumb' errors
+            # Simple ticker creation
             stock = yf.Ticker(ticker_symbol)
             
+            # Try fetching info with a specific verification
             info = None
             try:
-               info = stock.info
-            except Exception:
-               pass
-
+                # First try fast_info (newer, faster)
+                if hasattr(stock, 'fast_info'):
+                     # Convert fast_info to dict-like structure for key compatibility
+                     fast = stock.fast_info
+                     if fast and fast.last_price:
+                         print(f"   🚀 Fast Info found price: {fast.last_price}")
+                         # We still need metadata from .info for full profile if possible
+                         # but fast_info is great for price
+            
+                info = stock.info
+                print(f"   ℹ️ Info keys found: {len(info) if info else 0}")
+            except Exception as e:
+                print(f"   ⚠️ Stock.info fetch failed: {e}")
+            
             # If info is missing/empty, try history fallback
-            if not info or len(info) < 5:
-                 print("   ⚠️ Yahoo info empty, checking history...")
-                 hist = stock.history(period="5d")
-                 if not hist.empty:
-                     current_price = hist['Close'].iloc[-1]
-                     info = {
-                         'symbol': ticker_symbol,
-                         'currentPrice': current_price,
-                         'longName': ticker_symbol
-                     }
-                 else:
-                     raise ValueError("No Yahoo data")
+            # We strictly need price to consider it a success
+            current_price = 0.0
+            
+            # 1. Check Info for Price
+            if info:
+                current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose') or 0.0
+            
+            # 2. If no price in info, try history
+            if not current_price:
+                 print("   ⚠️ Price missing in info, checking history...")
+                 try:
+                     hist = stock.history(period="5d")
+                     if not hist.empty:
+                         current_price = hist['Close'].iloc[-1]
+                         if not info:
+                             info = {}
+                         info['currentPrice'] = current_price
+                         info['longName'] = info.get('longName', ticker_symbol)
+                         print(f"   ✅ Recovered price from history: {current_price}")
+                     else:
+                         print("   ❌ History Empty")
+                 except Exception as ex:
+                     print(f"   ❌ History fetch failed: {ex}")
 
-            # Validate price
-            price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
-            if not price:
-                raise ValueError("No price found")
+            if not current_price or float(current_price) == 0:
+                print(f"   ❌ Failed to get valid price for {ticker_symbol}")
+                continue
 
-            # If we get here, Yahoo worked!
+            # If we get here, we have a price!
             data = {
                 'symbol': ticker_symbol,
                 'name': info.get('longName', ticker_symbol),
-                'price': float(price),
+                'price': float(current_price),
                 'currency': info.get('currency', 'USD'),
                 'market_cap': info.get('marketCap'),
                 'pe_ratio': info.get('trailingPE'),
@@ -277,7 +297,7 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                 'sector': info.get('sector'),
                 'news': stock.news[:5] if stock.news else []
             }
-            print(f"   ✅ Yahoo Finance Success: {ticker_symbol}")
+            print(f"   ✅ Yahoo Finance Success: {ticker_symbol} | Price: {data['price']}")
             return data
 
         except Exception as e:
