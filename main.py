@@ -7,15 +7,11 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import requests
+import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import yfinance as yf
-# yf.set_tz_cache_location("/tmp/yfinance_cache") # Removed to use requests-cache instead
-import requests_cache
-
-# Configure generic cache
-requests_cache.install_cache('stock_api_cache', expire_after=3600, backend='sqlite')
-
+from cachetools import func # Function level caching
 from bs4 import BeautifulSoup
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -215,31 +211,11 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
 
 # ===================== DATA FETCHERS =====================
 
+# CACHE RESULTS FOR 1 HOUR to prevent 429 errors
+@func.ttl_cache(maxsize=100, ttl=3600) 
 def fetch_yfinance_data(symbol: str) -> Dict:
-    """Fetch comprehensive data from Yahoo Finance"""
-    print(f"📊 Fetching from Yahoo Finance for: {symbol}")
-
-    # CONFIGURING CACHED SESSION
-    session = requests_cache.CachedSession('yfinance_cache', expire_after=3600)
-    
-    # MIMIC REAL BROWSER HEADER
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    })
-    
-    retry = Retry(
-        total=3, 
-        backoff_factor=2, # Increased backoff
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"]
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
+    """Fetch comprehensive data with Fallback to Finnhub & Alpha Vantage"""
+    print(f"📊 Fetching data for: {symbol}")
 
     # Get symbol variations
     if '.' in symbol or symbol.isupper():
@@ -248,128 +224,119 @@ def fetch_yfinance_data(symbol: str) -> Dict:
         # Resolve the symbol
         variations = resolve_stock_symbol(symbol)
     
+    # 1. TRY YAHOO FINANCE
     for ticker_symbol in variations:
         try:
-            print(f"   🔍 Trying: {ticker_symbol}")
-
-            stock = yf.Ticker(ticker_symbol, session=session)
-            info=None
-            try:
-                time.sleep(3)
-
-                if hasattr(stock,'info'):
-                    info=stock.info
-                    if not info or (isinstance(info, dict) and len(info) < 3):
-                        print(f"   ⚠️ Empty info for {ticker_symbol}")
-                        raise ValueError("Empty info")
-                else:
-                    raise ValueError("No info attribute")
-
-
-            except Exception as e:
-                print(f"   ⚠️Info fetching error: {e}")
-                try:
-                    time.sleep(3)
-                    hist=stock.history(period="5d")
-                    if not hist.empty:
-                        info={
-                            'currentPrice': hist['Close'].iloc[-1],
-                            'regularMarketPrice': hist['Close'].iloc[-1],
-                            'shortName': ticker_symbol,
-                            'longName': ticker_symbol
-                        }
-                        print(f"   ✅ Fallback: got price from history: {info['currentPrice']}")
-                    else:
-                        print(f"   ⚠️ Empty history for {ticker_symbol}")
-                        continue 
-                except:
-                    print(f"   ⚠️Could not fetch info for {ticker_symbol}")
-                    continue
+            print(f"   🔍 Trying Yahoo Finance: {ticker_symbol}")
             
-            #validate info
-            if not info or (isinstance(info, dict) and len(info) < 3):
-                print(f"   ⚠️ invalid/empty info for {ticker_symbol}")
-                continue
-
-            #get current price            
-            current_price = (
-                info.get('currentPrice') or 
-                info.get('regularMarketPrice') or
-                info.get('previousClose')
-            )
+            # Simple ticker creation - let yfinance handle session/headers naturally
+            # to avoid 'cookie & crumb' errors
+            stock = yf.Ticker(ticker_symbol)
             
+            info = None
             try:
-                current_price = float(current_price)
-                if current_price <= 0:
-                    print(f"No valid price for {ticker_symbol}")
-                    continue
-            except (TypeError, ValueError):
-                print(f"Invalid price format for {ticker_symbol}")
-                continue
+               info = stock.info
+            except Exception:
+               pass
 
-            #get history
-            try:
-                hist = stock.history(period="1y")
-            except:
-                try:
-                    hist=stock.history(period="1mo")
-                except:
-                    hist=None
-                
+            # If info is missing/empty, try history fallback
+            if not info or len(info) < 5:
+                 print("   ⚠️ Yahoo info empty, checking history...")
+                 hist = stock.history(period="5d")
+                 if not hist.empty:
+                     current_price = hist['Close'].iloc[-1]
+                     info = {
+                         'symbol': ticker_symbol,
+                         'currentPrice': current_price,
+                         'longName': ticker_symbol
+                     }
+                 else:
+                     raise ValueError("No Yahoo data")
+
+            # Validate price
+            price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+            if not price:
+                raise ValueError("No price found")
+
+            # If we get here, Yahoo worked!
             data = {
                 'symbol': ticker_symbol,
-                'name': info.get('longName', info.get('shortName', symbol)),
-                'price': current_price,
+                'name': info.get('longName', ticker_symbol),
+                'price': float(price),
                 'currency': info.get('currency', 'USD'),
                 'market_cap': info.get('marketCap'),
                 'pe_ratio': info.get('trailingPE'),
-                'forward_pe': info.get('forwardPE'),
                 'peg_ratio': info.get('pegRatio'),
                 'price_to_book': info.get('priceToBook'),
                 'debt_to_equity': info.get('debtToEquity'),
                 'roe': info.get('returnOnEquity'),
-                'eps': info.get('trailingEps'),
                 'dividend_yield': info.get('dividendYield'),
                 'beta': info.get('beta'),
-                'day_high': info.get('dayHigh'),
-                'day_low': info.get('dayLow'),
                 'week_52_high': info.get('fiftyTwoWeekHigh'),
                 'week_52_low': info.get('fiftyTwoWeekLow'),
-                'volume': info.get('volume'),
-                'avg_volume': info.get('averageVolume'),
                 'sector': info.get('sector'),
-                'industry': info.get('industry'),
-                'history': hist,
-                'info': info,
-                'institutional_holders': stock.institutional_holders,
-                'news': stock.news[:10] if stock.news else []
+                'news': stock.news[:5] if stock.news else []
             }
-            # Try to get additional data
-            try:
-                data['institutional_holders'] = stock.institutional_holders
-            except:
-                pass
-            
-            try:
-                data['news'] = stock.news[:10] if stock.news else []
-            except:
-                pass
-                
-            print(f"   ✅ Yahoo Finance: {ticker_symbol} - {data['name']}")
+            print(f"   ✅ Yahoo Finance Success: {ticker_symbol}")
             return data
-                
+
         except Exception as e:
-            print(f"   ⚠️ {ticker_symbol}: {str(e)[:100]}")
+            print(f"   ⚠️ Yahoo blocked/failed for {ticker_symbol}: {e}")
             continue
-    
-    # All Yahoo attempts failed, try Alpha Vantage fallback
-    print("⚠️ Yahoo Finance blocked, trying Alpha Vantage...")
+
+    # 2. TRY FINNHUB (Preferred Fallback - Higher Quota)
+    print("⚠️ Yahoo failed, trying Finnhub...")
     for ticker_symbol in variations:
-        print(f"   🔄 Trying Alpha Vantage: {ticker_symbol}")
-        av_data = fetch_alpha_vantage_quote(ticker_symbol)
-        if av_data:
-            return av_data
-    
+        data = fetch_finnhub_quote_fallback(ticker_symbol)
+        if data:
+            return data
+
+    # 3. TRY ALPHA VANTAGE (Last Resort - Low Quota)
+    print("⚠️ Finnhub failed, trying Alpha Vantage...")
+    for ticker_symbol in variations:
+        data = fetch_alpha_vantage_quote(ticker_symbol)
+        if data:
+            return data
+            
+    print("❌ All sources failed.")
+    return None
+
+
+def fetch_finnhub_quote_fallback(symbol: str) -> Dict:
+    """Fetch quote from Finnhub as fallback"""
+    if not FREE_API_KEYS['finnhub']:
+        print("   ❌ Finnhub key missing")
+        return None
+        
+    try:
+        base_symbol = symbol.split('.')[0] # Finnhub uses US symbols mostly
+        print(f"   🔄 Trying Finnhub: {base_symbol}")
+        
+        response = requests.get(
+            f"https://finnhub.io/api/v1/quote?symbol={base_symbol}&token={FREE_API_KEYS['finnhub']}",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get('c', 0) # 'c' is current price
+            
+            if price > 0:
+                print(f"   ✅ Finnhub Success: {base_symbol} = ${price}")
+                return {
+                    'symbol': base_symbol,
+                    'name': base_symbol,
+                    'price': price,
+                    'currency': 'USD',
+                    'day_high': data.get('h'),
+                    'day_low': data.get('l'),
+                    'market_cap': None,
+                    'pe_ratio': None,
+                    'news': []
+                }
+    except Exception as e:
+        print(f"   ⚠️ Finnhub error: {e}")
+        
     return None
 
 
@@ -379,14 +346,11 @@ def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
         print("   ❌ Alpha Vantage key missing")    
         return None
     
-    print(f"   🔑 Using Alpha Vantage Key: {FREE_API_KEYS['alpha_vantage'][:10]}...")
-
-    
     try:
         base_symbol = symbol.split('.')[0]
 
         indicators = {}
-        print(f"   📊 Fetching quote for: {base_symbol}")
+        print(f"   📊 Fetching indicators for: {base_symbol}")
         
         url = "https://www.alphavantage.co/query"
 
@@ -399,12 +363,7 @@ def fetch_alpha_vantage_indicators(symbol: str) -> Dict:
             'apikey': FREE_API_KEYS['alpha_vantage']
         }
 
-        print(f"   📡 Request URL: {url}?symbol={base_symbol}&function=GLOBAL_QUOTE") 
-
         response = requests.get(url, params=params, timeout=10)
-
-        print(f"   📊 Response Status: {response.status_code}")  # ADD THIS
-        print(f"   📄 Response Data: {response.text[:200]}")
 
         if response.status_code == 200:
             data = response.json()
@@ -464,20 +423,6 @@ def fetch_alpha_vantage_quote(symbol: str) -> Dict:
             'volume': int(quote.get('06. volume', 0)),
             'market_cap': None,
             'pe_ratio': None,
-            'peg_ratio': None,
-            'price_to_book': None,
-            'debt_to_equity': None,
-            'roe': None,
-            'eps': None,
-            'dividend_yield': None,
-            'beta': None,
-            'week_52_high': None,
-            'week_52_low': None,
-            'sector': None,
-            'industry': None,
-            'history': None,
-            'info': {},
-            'institutional_holders': None,
             'news': []
         }
         
@@ -491,13 +436,11 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
     if not FREE_API_KEYS['finnhub']:
         return []
     
-    print("📰 Fetching news from Finnhub...")
-    
-    base_symbol = symbol.split('.')[0]
-    
-    articles = []
-    
     try:
+        # Rate limit check (simple sleep to stay safe)
+        time.sleep(1) 
+        
+        base_symbol = symbol.split('.')[0]
         from_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         to_date = datetime.now().strftime('%Y-%m-%d')
         
@@ -513,7 +456,7 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
         
         if response.status_code == 200:
             news_data = response.json()
-            
+            articles = []
             for article in news_data[:10]:
                 articles.append({
                     'title': article.get('headline', ''),
@@ -521,13 +464,12 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
                     'url': article.get('url', ''),
                     'published_at': datetime.fromtimestamp(article.get('datetime', 0)).isoformat()
                 })
+            return articles
             
-            print(f"   ✅ Finnhub: {len(articles)} articles")
-    
     except Exception as e:
-        print(f"   ⚠️ Finnhub error: {e}")
+        print(f"   ⚠️ Finnhub news error: {e}")
     
-    return articles
+    return []
 
    
 # ===================== AI ANALYSIS =====================
