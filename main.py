@@ -585,10 +585,15 @@ async def analyze_stock(request: StockRequest):
         api_calls += 1
         
         # Step 2: Technical Indicators
-        indicators = fetch_alpha_vantage_indicators(yf_data['symbol'])
-        if indicators:
-            data_sources.append("Alpha Vantage")
-            api_calls += 1
+        indicators = {}
+        try:
+            fetched_indicators = fetch_alpha_vantage_indicators(yf_data['symbol'])
+            if fetched_indicators:
+                indicators = fetched_indicators
+                data_sources.append("Alpha Vantage")
+                api_calls += 1
+        except Exception as e:
+            print(f"   ⚠️ Indicator fetching failed: {e}")
         
         # Step 3: News from multiple sources
         news_articles = []
