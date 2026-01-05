@@ -212,7 +212,7 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
 # ===================== DATA FETCHERS =====================
 
 # CACHE RESULTS FOR 1 HOUR to prevent 429 errors
-@func.ttl_cache(maxsize=100, ttl=3600) 
+# @func.ttl_cache(maxsize=100, ttl=3600) 
 def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data with Fallback to Finnhub & Alpha Vantage"""
     print(f"📊 Fetching data for: {symbol}")
@@ -278,15 +278,31 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                 print(f"   ❌ Failed to get valid price for {ticker_symbol}")
                 continue
 
-            # If we get here, we have a price!
+    # If we get here, we have a price!
+            # Try to populate more data from fast_info if keys are missing in info
+            try:
+                if hasattr(stock, 'fast_info'):
+                    fast = stock.fast_info
+                    # Critical checks for missing info keys
+                    if not info.get('marketCap'): info['marketCap'] = fast.market_cap
+                    if not info.get('fiftyTwoWeekHigh'): info['fiftyTwoWeekHigh'] = fast.year_high
+                    if not info.get('fiftyTwoWeekLow'): info['fiftyTwoWeekLow'] = fast.year_low
+                    if not info.get('dayHigh'): info['dayHigh'] = fast.day_high
+                    if not info.get('dayLow'): info['dayLow'] = fast.day_low
+                    if not info.get('volume'): info['volume'] = fast.last_volume
+                    print(f"   ✅ Recovered metrics from fast_info")
+            except Exception as e:
+                print(f"   ⚠️ fast_info extraction error: {e}")
+
             data = {
                 'symbol': ticker_symbol,
                 'name': info.get('longName', ticker_symbol),
                 'price': float(current_price),
                 'currency': info.get('currency', 'USD'),
                 'market_cap': info.get('marketCap'),
-                'pe_ratio': info.get('trailingPE'),
-                'peg_ratio': info.get('pegRatio'),
+                'pe_ratio': info.get('trailingPE') or info.get('forwardPE'),
+                'peg_ratio': info.get('pegRatio') or info.get('trailingPegRatio'),
+                'eps': info.get('trailingEps') or info.get('forwardEps'),
                 'price_to_book': info.get('priceToBook'),
                 'debt_to_equity': info.get('debtToEquity'),
                 'roe': info.get('returnOnEquity'),
@@ -294,6 +310,9 @@ def fetch_yfinance_data(symbol: str) -> Dict:
                 'beta': info.get('beta'),
                 'week_52_high': info.get('fiftyTwoWeekHigh'),
                 'week_52_low': info.get('fiftyTwoWeekLow'),
+                'day_high': info.get('dayHigh'),
+                'day_low': info.get('dayLow'),
+                'volume': info.get('volume'),
                 'sector': info.get('sector'),
                 'news': stock.news[:5] if stock.news else []
             }
@@ -323,20 +342,35 @@ def fetch_yfinance_data(symbol: str) -> Dict:
 
 
 def fetch_finnhub_quote_fallback(symbol: str) -> Dict:
-    """Fetch quote from Finnhub as fallback"""
+    """Fetch quote from Finnhub as fallback"""  
     if not FREE_API_KEYS['finnhub']:
         print("   ❌ Finnhub key missing")
         return None
         
     try:
-        base_symbol = symbol.split('.')[0] # Finnhub uses US symbols mostly
-        print(f"   🔄 Trying Finnhub: {base_symbol}")
+        # Finnhub supports some extensions, but mostly US. 
+        # For .NS (India), Finnhub often uses .NS.
+        # Let's try the original symbol first, then the base.
+        targets = [symbol]
+        if '.' in symbol:
+             targets.append(symbol.split('.')[0])
         
-        response = requests.get(
-            f"https://finnhub.io/api/v1/quote?symbol={base_symbol}&token={FREE_API_KEYS['finnhub']}",
-            timeout=10
-        )
-        
+        for s in targets:
+             print(f"   🔄 Trying Finnhub: {s}")
+             response = requests.get(
+                 f"https://finnhub.io/api/v1/quote?symbol={s}&token={FREE_API_KEYS['finnhub']}",
+                 timeout=10
+             )
+             
+             if response.status_code == 200:
+                 data = response.json()
+                 price = data.get('c', 0) # 'c' is current price
+                 if price > 0:
+                      base_symbol = s
+                      break
+        else:
+             return None # loop finished without break
+             
         if response.status_code == 200:
             data = response.json()
             price = data.get('c', 0) # 'c' is current price
@@ -348,8 +382,10 @@ def fetch_finnhub_quote_fallback(symbol: str) -> Dict:
                     'name': base_symbol,
                     'price': price,
                     'currency': 'USD',
+                    'currency': 'USD',
                     'day_high': data.get('h'),
                     'day_low': data.get('l'),
+                    'volume': data.get('v'),
                     'market_cap': None,
                     'pe_ratio': None,
                     'news': []
@@ -451,6 +487,52 @@ def fetch_alpha_vantage_quote(symbol: str) -> Dict:
         return None
 
 
+def fetch_alpha_vantage_overview(symbol: str) -> Dict:
+    """Fetch company overview (fundamentals) from Alpha Vantage"""
+    if not FREE_API_KEYS['alpha_vantage']:
+        return None
+        
+    try:
+        base_symbol = symbol.split('.')[0]
+        print(f"   📊 Fetching fundamentals for: {base_symbol}")
+        
+        url = "https://www.alphavantage.co/query"
+        params = {
+            'function': 'OVERVIEW',
+            'symbol': base_symbol,
+            'apikey': FREE_API_KEYS['alpha_vantage']
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if not data or 'Symbol' not in data:
+                return None
+                
+            overview = {
+                'market_cap': data.get('MarketCapitalization'),
+                'pe_ratio': data.get('PERatio'),
+                'peg_ratio': data.get('PEGRatio'),
+                'price_to_book': data.get('PriceToBookRatio'),
+                'dividend_yield': data.get('DividendYield'),
+                'eps': data.get('EPS'),
+                'beta': data.get('Beta'),
+                'week_52_high': data.get('52WeekHigh'),
+                'week_52_low': data.get('52WeekLow'),
+                'sector': data.get('Sector'),
+                'roe': data.get('ReturnOnEquityTTM')
+            }
+            
+            # Filter out None or 'None' strings
+            return {k: v for k, v in overview.items() if v and v != 'None'}
+            
+    except Exception as e:
+        print(f"   ⚠️ Alpha Vantage Overview error: {e}")
+    
+    return None
+
+
 def fetch_finnhub_news(symbol: str) -> List[Dict]:
     """Fetch news from Finnhub"""
     if not FREE_API_KEYS['finnhub']:
@@ -490,6 +572,46 @@ def fetch_finnhub_news(symbol: str) -> List[Dict]:
         print(f"   ⚠️ Finnhub news error: {e}")
     
     return []
+
+
+
+def fetch_finnhub_metrics(symbol: str) -> Dict:
+    """Fetch basic financials from Finnhub"""
+    if not FREE_API_KEYS['finnhub']:
+        return None
+        
+    try:
+        # Try original first, then base
+        targets = [symbol]
+        if '.' in symbol:
+             targets.append(symbol.split('.')[0])
+             
+        for s in targets:
+            print(f"   📊 Fetching Finnhub metrics for: {s}")
+            response = requests.get(
+                f"https://finnhub.io/api/v1/stock/metric?symbol={s}&metric=all&token={FREE_API_KEYS['finnhub']}",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                metric = data.get('metric', {})
+                if metric:
+                     return {
+                        'market_cap': metric.get('marketCapitalization'),
+                        'pe_ratio': metric.get('peBasicExclExtraTTM'),
+                        'beta': metric.get('beta'),
+                        'dividend_yield': metric.get('dividendYieldIndicatedAnnual'),
+                        'week_52_high': metric.get('52WeekHigh'),
+                        'week_52_low': metric.get('52WeekLow'),
+                        'roe': metric.get('roeTTM'),
+                        'price_to_book': metric.get('pbAnnual'),
+                        'eps': metric.get('epsBasicExclExtraTTM')
+                     }
+    except Exception as e:
+        print(f"   ⚠️ Finnhub Metrics error: {e}")
+    
+    return None
 
 
 def fetch_yahoo_news_rss(symbol: str) -> List[Dict]:
@@ -633,15 +755,27 @@ async def analyze_stock(request: StockRequest):
     
     api_calls = 0
     data_sources = []
+    debug_log = {"steps": []}
     
     try:
-        print("\n" + "="*80)
-        print(f"🔬 ENHANCED FREE ANALYSIS: {stock_name_final}")
-        print("="*80)
+        print("\n" + "!"*80)
+        print(f"🔬 ENHANCED FREE ANALYSIS (DEBUG MODE): {stock_name_final}")
+        print("!"*80)
         
         # Step 1: Yahoo Finance
         yf_data = fetch_yfinance_data(stock_name_final)
-        time.sleep(5)
+        time.sleep(1) 
+        
+        if not yf_data:
+             debug_log["steps"].append("Yahoo Finance returned None")
+             pass 
+             
+        debug_log["initial_yf"] = {
+            "pe": yf_data.get('pe_ratio'),
+            "cap": yf_data.get('market_cap'),
+            "price": yf_data.get('price')
+        }
+        print(f"   🔍 DEBUG: Initial Metrics - PE: {yf_data.get('pe_ratio')}, Cap: {yf_data.get('market_cap')}")
         if not yf_data:
             raise HTTPException(
                 status_code=404, 
@@ -651,16 +785,84 @@ async def analyze_stock(request: StockRequest):
         data_sources.append("Yahoo Finance")
         api_calls += 1
         
-        # Step 2: Technical Indicators
+        # Step 2: Technical Indicators & Fundamentals Check
         indicators = {}
         try:
             fetched_indicators = fetch_alpha_vantage_indicators(yf_data['symbol'])
             if fetched_indicators:
                 indicators = fetched_indicators
-                data_sources.append("Alpha Vantage")
+                data_sources.append("Alpha Vantage (Indicators)")
                 api_calls += 1
+                
+            # If critical metrics are missing, try Alpha Vantage Overview
+            if not yf_data.get('pe_ratio') or not yf_data.get('market_cap'):
+                print("   ⚠️ Missing metrics, trying Alpha Vantage Overview...")
+                av_overview = fetch_alpha_vantage_overview(yf_data['symbol'])
+                if av_overview:
+                    print("   ✅ Recovered metrics from Alpha Vantage")
+                    # Merge data, prioritizing existing yf_data if valid
+                    for key, value in av_overview.items():
+                        if not yf_data.get(key):
+                            yf_data[key] = value
+                    
+                    data_sources.append("Alpha Vantage (Fundamentals)")
+                    api_calls += 1
+            
+             
+            # Additional Fallback: Finnhub Metrics
+            if not yf_data.get('pe_ratio') or not yf_data.get('market_cap'):
+                 print("   ⚠️ Still missing metrics, trying Finnhub...")
+                 debug_log["steps"].append("Triggered Finnhub Fallback")
+                 fh_metrics = fetch_finnhub_metrics(yf_data['symbol'])
+                 if fh_metrics:
+                     print("   ✅ Recovered metrics from Finnhub")
+                     debug_log["finnhub_recovery"] = fh_metrics
+                     for key, value in fh_metrics.items():
+                         if not yf_data.get(key) and value:
+                             yf_data[key] = value
+                     data_sources.append("Finnhub (Fundamentals)")
+                     api_calls += 1
+                 else:
+                     debug_log["steps"].append("Finnhub Fallback Failed")
+
+            # Additional Fallback: Missing Quote Data (Volume, Day High/Low)
+            if not yf_data.get('volume') or not yf_data.get('day_high'):
+                print("   ⚠️ Missing quote details, trying Finnhub Quote...")
+                fh_quote = fetch_finnhub_quote_fallback(yf_data['symbol'])
+                if fh_quote:
+                    print("   ✅ Recovered quote data from Finnhub")
+                    if not yf_data.get('volume'): yf_data['volume'] = fh_quote.get('volume')
+                    if not yf_data.get('day_high'): yf_data['day_high'] = fh_quote.get('day_high')
+                    if not yf_data.get('day_low'): yf_data['day_low'] = fh_quote.get('day_low')
+                    if "Finnhub" not in data_sources: data_sources.append("Finnhub (Quote)")
+                
+                # If still missing, try Alpha Vantage Quote as last resort
+                if not yf_data.get('volume') and FREE_API_KEYS['alpha_vantage']:
+                     print("   ⚠️ Still missing volume, trying Alpha Vantage...")
+                     av_quote = fetch_alpha_vantage_quote(yf_data['symbol'])
+                     if av_quote:
+                         if not yf_data.get('volume'): yf_data['volume'] = av_quote.get('volume')
+                         if not yf_data.get('day_high'): yf_data['day_high'] = av_quote.get('day_high')
+                         if not yf_data.get('day_low'): yf_data['day_low'] = av_quote.get('day_low')
+                         if "Alpha Vantage" not in data_sources: data_sources.append("Alpha Vantage (Quote)")
+            
+            # Fallback: Calculate EPS if missing
+            if not yf_data.get('eps') and yf_data.get('price') and yf_data.get('pe_ratio'):
+                try:
+                    yf_data['eps'] = float(yf_data['price']) / float(yf_data['pe_ratio'])
+                    print(f"   🧮 Calculated EPS from Price/PE: {yf_data['eps']:.2f}")
+                except:
+                    pass
+
+            debug_log["final_metrics"] = {
+                "pe": yf_data.get('pe_ratio'),
+                "cap": yf_data.get('market_cap'),
+                "eps": yf_data.get('eps')
+            }
+                    
         except Exception as e:
-            print(f"   ⚠️ Indicator fetching failed: {e}")
+            print(f"   ⚠️ Indicator/Fundamentals fetching failed: {e}")
+            debug_log["error_indicators"] = str(e)
         
         # Step 3: News from multiple sources
         news_articles = []
@@ -1015,7 +1217,8 @@ async def analyze_stock(request: StockRequest):
             ],
             
             analysis_timestamp=datetime.now().isoformat(),
-            api_calls_used=api_calls
+            api_calls_used=api_calls,
+            debug_info=debug_log
         )
         
         print("✅ ANALYSIS COMPLETE!")
