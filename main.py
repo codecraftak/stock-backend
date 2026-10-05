@@ -1,37 +1,73 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import os
 import json
 import time
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
-import requests
-import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-import yfinance as yf
-from cachetools import func # Function level caching
-from bs4 import BeautifulSoup
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import re
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import requests
+import urllib3
+from cachetools import func # Function level caching
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+urllib3.disable_warnings()
+
+# Background pre-warmer for heavy packages so /health responds in milliseconds on cold boot
+def _warmup_heavy_modules():
+    try:
+        import yfinance as _
+        from bs4 import BeautifulSoup as _
+        print("⚡ [Warmup] Heavy packages (yfinance, bs4) initialized in background.")
+    except Exception as e:
+        print(f"⚠️ [Warmup] Prewarm notice: {e}")
+
+async def _keep_alive_loop():
+    """Keeps Render container warm by self-pinging external URL every 9 minutes so it never sleeps"""
+    backend_url = os.getenv("RENDER_EXTERNAL_URL") or "https://stock-backend-l55g.onrender.com"
+    # Initial delay before starting keep-alive pings
+    await asyncio.sleep(120)
+    while True:
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: requests.get(f"{backend_url}/health", timeout=10))
+            print(f"🔄 [Keep-Alive] Pinged {backend_url}/health")
+        except Exception as e:
+            print(f"⚠️ [Keep-Alive] Ping notice: {e}")
+        await asyncio.sleep(540) # 9 minutes (Render sleeps at 15 minutes)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Offload heavy imports to background thread so Uvicorn binds immediately
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _warmup_heavy_modules)
+    # 2. Start keep-alive loop so container never goes to sleep while active
+    keep_alive_task = asyncio.create_task(_keep_alive_loop())
+    yield
+    keep_alive_task.cancel()
 
 app = FastAPI(
     title="Stock Analysis API",
     version="4.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=lifespan
 )
-
-import requests
-requests.packages.urllib3.disable_warnings()
 
 # ===================== CORS CONFIGURATION =====================
 app.add_middleware(
@@ -215,6 +251,7 @@ def resolve_stock_symbol(user_input: str) -> List[str]:
 # @func.ttl_cache(maxsize=100, ttl=3600) 
 def fetch_yfinance_data(symbol: str) -> Dict:
     """Fetch comprehensive data with Fallback to Finnhub & Alpha Vantage"""
+    import yfinance as yf
     print(f"📊 Fetching data for: {symbol}")
 
     # Get symbol variations
@@ -616,6 +653,7 @@ def fetch_finnhub_metrics(symbol: str) -> Dict:
 
 def fetch_yahoo_news_rss(symbol: str) -> List[Dict]:
     """Fetch news from Yahoo RSS (Bypasses API blocks)"""
+    from bs4 import BeautifulSoup
     print(f"📰 Fetching Yahoo RSS news for {symbol}...")
     articles = []
     try:
